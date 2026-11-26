@@ -1340,12 +1340,20 @@ exit 1
 `, iid)
 }
 
+func (a *HostAgent) cloudInitSSHArgs() []string {
+	sshAddress, sshPort := a.sshAddressPort()
+	args := a.sshConfig.Args()
+	if runtime.GOOS == "windows" {
+		// Windows OpenSSH cannot use Lima's mux socket for these sessions.
+		args = sshutil.DisableControlMasterOptsFromSSHArgs(args)
+	}
+	return append(args, "-T", "-p", strconv.Itoa(sshPort), sshAddress, "sh", "-s")
+}
+
 func (a *HostAgent) probeCloudInitCompleted(ctx context.Context) bool {
 	probeCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
-	sshAddress, sshPort := a.sshAddressPort()
-	args := a.sshConfig.Args()
-	args = append(args, "-T", "-p", strconv.Itoa(sshPort), sshAddress, "sh", "-s")
+	args := a.cloudInitSSHArgs()
 	cmd := exec.CommandContext(probeCtx, a.sshConfig.Binary(), args...)
 	cmd.Stdin = strings.NewReader(cloudInitCompletedProbeScript(a.iid))
 	return cmd.Run() == nil
@@ -1357,9 +1365,7 @@ func (a *HostAgent) probeCloudInitCompleted(ctx context.Context) bool {
 type cloudInitStream func(ctx context.Context, read func(io.Reader)) error
 
 func (a *HostAgent) streamCloudInitLog(ctx context.Context, read func(io.Reader)) error {
-	sshAddress, sshPort := a.sshAddressPort()
-	args := a.sshConfig.Args()
-	args = append(args, "-T", "-p", strconv.Itoa(sshPort), sshAddress, "sh", "-s")
+	args := a.cloudInitSSHArgs()
 
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()

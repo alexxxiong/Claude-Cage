@@ -1,0 +1,74 @@
+Disable SSH multiplexing for Windows cloud-init probes and log streams.
+
+diff --git a/pkg/hostagent/cloudinit_test.go b/pkg/hostagent/cloudinit_test.go
+index 5341c10..d57cdfd 100644
+--- a/pkg/hostagent/cloudinit_test.go
++++ b/pkg/hostagent/cloudinit_test.go
+@@ -12,6 +12,7 @@ import (
+ 	"os/exec"
+ 	"path/filepath"
+ 	"runtime"
++	"slices"
+ 	"strings"
+ 	"sync"
+ 	"sync/atomic"
+@@ -22,8 +23,20 @@ import (
+ 	"gotest.tools/v3/assert"
+ 
+ 	"github.com/lima-vm/lima/v2/pkg/hostagent/events"
++	"github.com/lima-vm/sshocker/pkg/ssh"
+ )
+ 
++func TestCloudInitSSHArgs(t *testing.T) {
++	base := []string{"-o", "BatchMode=yes", "-o", "ControlMaster=auto", "-o", "ControlPath=test-socket", "-o", "ControlPersist=yes"}
++	agent := &HostAgent{sshConfig: &ssh.SSHConfig{AdditionalArgs: base}, instSSHAddress: "127.0.0.1", sshLocalPort: 2222}
++	want := base
++	if runtime.GOOS == "windows" {
++		want = []string{"-o", "ControlMaster=no", "-o", "ControlPath=none", "-o", "ControlPersist=no", "-o", "BatchMode=yes"}
++	}
++	want = slices.Concat(want, []string{"-T", "-p", "2222", "127.0.0.1", "sh", "-s"})
++	assert.DeepEqual(t, agent.cloudInitSSHArgs(), want)
++}
++
+ func TestEmitCloudInitProgressEventStripsControlChars(t *testing.T) {
+ 	var buf bytes.Buffer
+ 	a := &HostAgent{eventEnc: json.NewEncoder(&buf)}
+diff --git a/pkg/hostagent/hostagent.go b/pkg/hostagent/hostagent.go
+index b3b72bf..b86dae0 100644
+--- a/pkg/hostagent/hostagent.go
++++ b/pkg/hostagent/hostagent.go
+@@ -1340,12 +1340,20 @@ exit 1
+ `, iid)
+ }
+ 
++func (a *HostAgent) cloudInitSSHArgs() []string {
++	sshAddress, sshPort := a.sshAddressPort()
++	args := a.sshConfig.Args()
++	if runtime.GOOS == "windows" {
++		// Windows OpenSSH cannot use Lima's mux socket for these sessions.
++		args = sshutil.DisableControlMasterOptsFromSSHArgs(args)
++	}
++	return append(args, "-T", "-p", strconv.Itoa(sshPort), sshAddress, "sh", "-s")
++}
++
+ func (a *HostAgent) probeCloudInitCompleted(ctx context.Context) bool {
+ 	probeCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+ 	defer cancel()
+-	sshAddress, sshPort := a.sshAddressPort()
+-	args := a.sshConfig.Args()
+-	args = append(args, "-T", "-p", strconv.Itoa(sshPort), sshAddress, "sh", "-s")
++	args := a.cloudInitSSHArgs()
+ 	cmd := exec.CommandContext(probeCtx, a.sshConfig.Binary(), args...)
+ 	cmd.Stdin = strings.NewReader(cloudInitCompletedProbeScript(a.iid))
+ 	return cmd.Run() == nil
+@@ -1357,9 +1365,7 @@ func (a *HostAgent) probeCloudInitCompleted(ctx context.Context) bool {
+ type cloudInitStream func(ctx context.Context, read func(io.Reader)) error
+ 
+ func (a *HostAgent) streamCloudInitLog(ctx context.Context, read func(io.Reader)) error {
+-	sshAddress, sshPort := a.sshAddressPort()
+-	args := a.sshConfig.Args()
+-	args = append(args, "-T", "-p", strconv.Itoa(sshPort), sshAddress, "sh", "-s")
++	args := a.cloudInitSSHArgs()
+ 
+ 	ctx, cancel := context.WithCancel(ctx)
+ 	defer cancel()
