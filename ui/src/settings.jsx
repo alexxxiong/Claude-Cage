@@ -698,6 +698,7 @@ export function SettingsPanel({
                     ["关闭当前标签", "⌘W"],
                     ["切换标签", "⌘1–9"],
                     ["设置", "⌘,"],
+                    ...(usesControl ? [["普通终端复制选区 / 粘贴", "Ctrl+C / Ctrl+V"]] : []),
                     ["终端复制粘贴", usesControl ? "Ctrl+Shift+C / V" : "⌘C / ⌘V"],
                   ].map(([label, key]) => (
                     <div key={label}>

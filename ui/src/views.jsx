@@ -1,4 +1,4 @@
-import { isMac, terminalModifier } from "./platform.mjs";
+import { isMac, shellClipboardShortcut, terminalModifier } from "./platform.mjs";
 import React, {
   useEffect,
   useRef,
@@ -534,6 +534,22 @@ export function TerminalView({ session, visible, focused = true, onStatus, onCon
         return false;
       }
       if (event.type !== "keydown") return true;
+      if ((session.terminalKind || session.kind) === "shell") {
+        const action = shellClipboardShortcut(event, terminal.hasSelection());
+        if (action === "copy") {
+          event.preventDefault();
+          copySelection();
+          return false;
+        }
+        if (action === "paste") {
+          // Let the browser dispatch a trusted paste when there is no native bridge.
+          if (nativeAvailable()) {
+            event.preventDefault();
+            receive(readClipboardContent());
+          }
+          return false;
+        }
+      }
       const claudeImagePaste = ((session.terminalKind || session.kind) === "claude" || session.cli_session_id) &&
         event.ctrlKey && !event.metaKey && !event.altKey && !event.shiftKey && event.key.toLowerCase() === "v";
       if (claudeImagePaste && nativeAvailable()) {

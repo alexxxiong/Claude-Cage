@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { primaryModifier, terminalModifier, shortcut } from "./platform.mjs";
+import { primaryModifier, terminalModifier, shellClipboardShortcut, shortcut } from "./platform.mjs";
 
 test("Linux defaults to Ctrl and macOS keeps Command", async () => {
   const descriptor = Object.getOwnPropertyDescriptor(globalThis, "navigator");
@@ -32,4 +32,16 @@ test("Windows shortcuts reserve Ctrl+C for terminal interruption and ignore AltG
   assert.equal(primaryModifier({ ...ctrl, metaKey: true }, false), true);
   assert.equal(shortcut("⌘⇧↵", true), "Ctrl+Shift+Enter");
   assert.equal(shortcut("⌘W", false), "⌘W");
+});
+
+test("plain shell clipboard keys preserve interrupts, terminal bindings and IME events", () => {
+  const ctrl = { ctrlKey: true, key: "c" };
+  assert.equal(shellClipboardShortcut(ctrl, false, true), null);
+  assert.equal(shellClipboardShortcut(ctrl, true, true), "copy");
+  assert.equal(shellClipboardShortcut({ ...ctrl, key: "v" }, false, true), "paste");
+  for (const modifier of ["shiftKey", "metaKey", "altKey", "isComposing"]) {
+    assert.equal(shellClipboardShortcut({ ...ctrl, [modifier]: true }, true, true), null);
+  }
+  assert.equal(shellClipboardShortcut(ctrl, true, false), null);
+  assert.equal(shellClipboardShortcut({ ...ctrl, ctrlKey: false }, true, true), null);
 });
