@@ -1,3 +1,4 @@
+import { ProjectFiles } from "./project-files";
 import { DesktopList } from "./account-desktops";
 import { HostPluginsNav, HostPluginsSidebar, PluginPagesNav } from "./host-plugins";
 import { shortcut } from "./platform.mjs";
@@ -274,6 +275,7 @@ export function WorkspaceSidebar({
   const ssh = useSSHNavigation();
   const [collapsed, setCollapsed] = useState({});
   const [allSessionsShown, setAllSessionsShown] = useState({});
+  const [fileFolders, setFileFolders] = useState(null);
   const [projectMenu, setProjectMenu] = useState(null);
   const sessionBaseline = useRef(new Map());
   const scroll = useRef(null);
@@ -592,6 +594,10 @@ export function WorkspaceSidebar({
                   <MoreHorizontal size={15} />
                 </button>
               </div>
+              {expanded && <div className="project-tools">
+                <button disabled={!ready || busy} onClick={() => setFileFolders(folders)}>文件传输</button>
+                <button disabled={!running || busy} aria-haspopup="menu" data-terminal-location={path} onClick={event => onNewTerminal(path, event.currentTarget)}>新建终端</button>
+              </div>}
               {terminalMenuAt(path)}
               {expanded && folders.length > 1 && <div className="sidebar-project-folders" aria-label={tr("{0} 的文件夹", (project))}>
                 {folders.map((folder, index) => <button key={folder} title={folder} disabled={!ready || busy} onClick={() => onEditor(folder)} aria-label={tr("打开文件夹 {0} 的编辑器", (projectName(folder)))}><Folder size={13} /><span>{projectName(folder)}</span>{index === 0 && <small>{tr("默认")}</small>}</button>)}
@@ -690,6 +696,7 @@ export function WorkspaceSidebar({
           {updateAction}
         </div>
       </div>
+    {fileFolders && createPortal(<ProjectFiles folders={fileFolders} onClose={() => setFileFolders(null)} />, document.body)}
     </aside>
   );
   const activeProjectMenu = projectMenu && projects.includes(projectMenu.path) ? (

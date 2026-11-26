@@ -293,6 +293,14 @@ export function ProjectDialog({
           <label htmlFor="project-name">{tr("项目名称")}</label>
           <input id="project-name" autoFocus value={name} maxLength={100} onChange={event => setName(event.target.value)} placeholder={tr("例如：课程系统")} disabled={busy} />
           <label>{tr("源文件夹")}</label>
+          {remote && !editing && folders.length === 0 && !path.trim() && <button type="button" disabled={busy || !name.trim()} onClick={async () => {
+            setSubmitting(true); setError("");
+            try {
+              const folder = await api("/projects/new-folder", { name: name.trim() });
+              appendFolder(folder.path);
+            } catch (e) { setError(e.message); }
+            finally { setSubmitting(false); }
+          }}>按项目名称创建云端文件夹</button>}
           {folders.length > 0 && <ul className="project-folder-list" aria-label={tr("已绑定文件夹")}>
             {folders.map((folder, index) => <li key={folder}>
               <FolderOpen size={16} aria-hidden="true" /><span><strong>{projectName(folder)}</strong><small>{folder}</small></span>

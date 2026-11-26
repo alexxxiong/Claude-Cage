@@ -1,0 +1,10 @@
+.cage-project-files { padding: 16px 20px; display: grid; gap: 12px; min-height: 240px; }
+.cpf-actions, .cpf-row, .cpf-row span, .cpf-row button, .project-tools { display: flex; align-items: center; gap: 8px; }
+.cpf-actions { flex-wrap: wrap; }
+.cpf-path, .cpf-row span { overflow-wrap: anywhere; }
+.cpf-list { max-height: 48vh; min-height: 100px; overflow: auto; }
+.cpf-row { padding: 5px 0; border-bottom: 1px solid #8883; }
+.cpf-row small { margin-left: auto; white-space: nowrap; }
+.cpf-row button { text-align: left; }
+.project-tools { padding: 4px 8px 6px; flex-wrap: wrap; }
+.project-tools button { font-size: 12px; }
