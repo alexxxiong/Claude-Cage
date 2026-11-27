@@ -22,6 +22,14 @@ func trustedViewProof(token string) string {
 	digest := sha256.Sum256([]byte("trusted desktop view\x00" + token))
 	return hex.EncodeToString(digest[:])
 }
+
+const mobilePairHeader = "X-Cage-Desktop-Pair"
+
+func mobilePairProof(token string) string {
+	digest := sha256.Sum256([]byte("desktop pairing management\x00" + token))
+	return hex.EncodeToString(digest[:])
+}
+
 func (s *Server) hasTrustedView(r *http.Request) bool {
 	c, err := r.Cookie(s.cookieName() + "-desktop")
 	return err == nil && equalSecret(c.Value, trustedViewProof(s.token))

@@ -187,7 +187,7 @@ func TestDesktopCLIViewUsesOnlyItsLocalWorkload(t *testing.T) {
 		r.Header.Set("Content-Type", "application/json")
 		r.Header.Set("Origin", gateway.origin)
 		r.AddCookie(&http.Cookie{Name: gateway.cookieName(), Value: gateway.session})
-		r.AddCookie(&http.Cookie{Name: gateway.cookieName() + "-desktop", Value: trustedViewProof(gateway.token)})
+		r.Header.Set(mobilePairHeader, mobilePairProof(gateway.token))
 		w := httptest.NewRecorder()
 		gateway.handler().ServeHTTP(w, r)
 		if tc.want == 200 {

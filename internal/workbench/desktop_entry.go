@@ -95,6 +95,7 @@ func DesktopEntry(fullConfig string, opts DesktopOptions) (DesktopResult, error)
 	if err != nil || code != http.StatusOK {
 		return DesktopResult{}, errors.New("无法关联桌面窗口和连接服务")
 	}
+	result.MobilePairProof = mobilePairProof(c.record.Token)
 	return result, nil
 }
 

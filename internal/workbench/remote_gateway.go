@@ -318,7 +318,8 @@ func (s *Server) routeRemote(w http.ResponseWriter, r *http.Request) bool {
 	if remote && (r.URL.Path == "/api/mobile-pair" || strings.HasPrefix(r.URL.Path, "/api/mobile-pair/")) {
 		// Pairing management belongs to the selected workload. The phone's
 		// own /api/mobile/ session remains bound to the host that paired it.
-		if r.URL.Path != "/api/mobile-pair" || !s.hasTrustedView(r) || requestInitiator(r) == jobInitiatorAgent {
+		pairWindow := s.desktopEntry && equalSecret(r.Header.Get(mobilePairHeader), mobilePairProof(s.token))
+		if r.URL.Path != "/api/mobile-pair" || !(pairWindow || s.hasTrustedView(r)) || requestInitiator(r) == jobInitiatorAgent {
 			http.Error(w, "请在 Cage 桌面窗口管理远程手机配对", http.StatusForbidden)
 			return true
 		}
@@ -357,6 +358,7 @@ func (s *Server) routeRemote(w http.ResponseWriter, r *http.Request) bool {
 			p.SetURL(target)
 			p.Out.Host = target.Host
 			p.Out.Header.Del(connectionHeader)
+			p.Out.Header.Del(mobilePairHeader)
 			query := p.Out.URL.Query()
 			query.Del("connection")
 			p.Out.URL.RawQuery = query.Encode()

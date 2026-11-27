@@ -17,6 +17,7 @@ internal sealed class MainWindow : Form
     private readonly NotifyIcon tray;
     private readonly AppUpdater updater;
     private int expectedPort;
+    private string mobilePairProof = "";
     private bool controllerNeedsUpdate, allowQuit, bootstrapping, initializing, webFailed, quitProbeInFlight;
     private bool completingSmoke;
     // Bridge requests still running on the UI thread, such as refreshSession's "desktop".
@@ -264,6 +265,12 @@ internal sealed class MainWindow : Form
             core.Settings.IsStatusBarEnabled = false; core.Settings.IsZoomControlEnabled = false;
             core.Settings.AreBrowserAcceleratorKeysEnabled = false;
             core.Settings.IsPasswordAutosaveEnabled = false; core.Settings.IsGeneralAutofillEnabled = false;
+            core.AddWebResourceRequestedFilter("http://localhost:*/api/mobile-pair", CoreWebView2WebResourceContext.All);
+            core.WebResourceRequested += (_, e) => {
+                if (mobilePairProof.Length > 0 && UpdatePolicy.IsWorkbench(core.Source, expectedPort) &&
+                    UpdatePolicy.IsWorkbench(e.Request.Uri, expectedPort) && new Uri(e.Request.Uri).AbsolutePath == "/api/mobile-pair")
+                    e.Request.Headers.SetHeader("X-Cage-Desktop-Pair", mobilePairProof);
+            };
             core.NavigationStarting += (_, e) => { if (!UpdatePolicy.IsWorkbench(e.Uri, expectedPort)) e.Cancel = true; };
             core.NewWindowRequested += (_, e) => e.Handled = true;
             core.DownloadStarting += (_, e) => e.Cancel = true;
@@ -435,6 +442,7 @@ internal sealed class MainWindow : Form
                 message.Text = data.Text("message"); existing.Show(); complete.Show(); return;
             }
             var entry = UpdatePolicy.Entry(data.Text("url")); expectedPort = entry.Port;
+            mobilePairProof = data.Text("mobile_pair_proof");
             smokePhase = "loading_workbench";
             Text = controllerNeedsUpdate ? InterfaceLanguage.Text("Cage（更新待完成）") : "Cage";
             web.CoreWebView2.Navigate(entry.AbsoluteUri);

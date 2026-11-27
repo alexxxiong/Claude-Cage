@@ -22,11 +22,12 @@ import (
 
 type DesktopOptions struct{ CompleteUpdate, UseExisting bool }
 type DesktopResult struct {
-	Status     string             `json:"status"`
-	URL        string             `json:"url,omitempty"`
-	Message    string             `json:"message,omitempty"`
-	Legacy     bool               `json:"legacy,omitempty"`
-	Controller ControllerIdentity `json:"controller"`
+	MobilePairProof string             `json:"mobile_pair_proof,omitempty"`
+	Status          string             `json:"status"`
+	URL             string             `json:"url,omitempty"`
+	Message         string             `json:"message,omitempty"`
+	Legacy          bool               `json:"legacy,omitempty"`
+	Controller      ControllerIdentity `json:"controller"`
 }
 type controllerClient struct {
 	profile, origin string
