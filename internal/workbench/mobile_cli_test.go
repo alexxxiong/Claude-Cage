@@ -168,6 +168,36 @@ func TestDesktopCLIViewUsesOnlyItsLocalWorkload(t *testing.T) {
 	if w := gatewayRequest(gateway, "/api/mobile-pair", generation); w.Code != http.StatusForbidden || local.commands.Load() != 1 {
 		t.Fatalf("phone pairing management reached the SSH workload: %d", w.Code)
 	}
+	for _, tc := range []struct {
+		method, id, path, initiator string
+		want                        int
+	}{
+		{"GET", generation, "/api/mobile-pair", "", 200},
+		{"POST", generation, "/api/mobile-pair", "", 200},
+		{"DELETE", generation, "/api/mobile-pair", "", 200},
+		{"POST", "stale", "/api/mobile-pair", "", 409},
+		{"POST", "", "/api/mobile-pair", "", 409},
+		{"POST", generation, "/api/mobile-pair", jobInitiatorAgent, 403},
+		{"POST", generation, "/api/mobile-pair/unknown", "", 403},
+	} {
+		count := local.commands.Load()
+		r := httptest.NewRequest(tc.method, gateway.origin+tc.path, strings.NewReader("{}"))
+		r.Header.Set(connectionHeader, tc.id)
+		r.Header.Set(jobInitiatorHeader, tc.initiator)
+		r.Header.Set("Content-Type", "application/json")
+		r.Header.Set("Origin", gateway.origin)
+		r.AddCookie(&http.Cookie{Name: gateway.cookieName(), Value: gateway.session})
+		r.AddCookie(&http.Cookie{Name: gateway.cookieName() + "-desktop", Value: trustedViewProof(gateway.token)})
+		w := httptest.NewRecorder()
+		gateway.handler().ServeHTTP(w, r)
+		if tc.want == 200 {
+			count++
+		}
+		if w.Code != tc.want || local.commands.Load() != count {
+			t.Fatalf("%s %s %q: %d %s", tc.method, tc.path, tc.id, w.Code, w.Body.String())
+		}
+	}
+
 }
 
 func TestMobileCLIStopFromPreviousUnlock(t *testing.T) {

@@ -316,8 +316,22 @@ func (s *Server) routeRemote(w http.ResponseWriter, r *http.Request) bool {
 		return true
 	}
 	if remote && (r.URL.Path == "/api/mobile-pair" || strings.HasPrefix(r.URL.Path, "/api/mobile-pair/")) {
-		http.Error(w, "请切换到这台电脑的本机环境，再管理手机配对", http.StatusForbidden)
-		return true
+		// Pairing management belongs to the selected workload. The phone's
+		// own /api/mobile/ session remains bound to the host that paired it.
+		if r.URL.Path != "/api/mobile-pair" || !s.hasTrustedView(r) || requestInitiator(r) == jobInitiatorAgent {
+			http.Error(w, "请在 Cage 桌面窗口管理远程手机配对", http.StatusForbidden)
+			return true
+		}
+		if r.Header.Get(connectionHeader) == "" || session == nil {
+			http.Error(w, "请重新选择要配对的远程主机", http.StatusConflict)
+			return true
+		}
+		switch r.Method {
+		case http.MethodGet, http.MethodPost, http.MethodDelete:
+		default:
+			http.Error(w, "不支持的配对操作", http.StatusMethodNotAllowed)
+			return true
+		}
 	}
 	if remote && r.Method == "GET" && r.URL.Path == "/api/browser/files/saved" {
 		profile, err := clientDownloadProfile(s.profile, ClientContext{Mode: "remote", InstanceID: session.Ref.InstanceID})

@@ -24,7 +24,7 @@ function hasNewPairing(baseline, list) {
   return false;
 }
 
-export function MobilePairSettings({ relay, savedRelay, onChange, onConfirm }) {
+export function MobilePairSettings({ remoteName, relay, savedRelay, onChange, onConfirm }) {
   const tr = useTranslation();
   const [custom, setCustom] = useState(Boolean(relay));
   const [token, setToken] = useState("");
@@ -138,7 +138,7 @@ export function MobilePairSettings({ relay, savedRelay, onChange, onConfirm }) {
   return (
     <section className="remote-link-settings" aria-label={tr("远程连接")}>
       <div className="section-title">
-        <h3>{tr("远程连接")}</h3>
+        <h3>{tr("远程连接")}{remoteName && <> · {remoteName}</>}</h3>
         <p>
           {tr("手机配对后可以打开远程浏览器和 Claude Desktop，也可以继续 Claude Code 会话、处理工具审批。")}
         </p>

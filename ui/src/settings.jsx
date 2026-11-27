@@ -5,7 +5,7 @@ import { PasswordVaultSettings } from "./password-vault";
 import { KeyRound } from "lucide-react";
 import { InlineSelect } from "./inline-select";
 import { LanguageSettings } from "./language-settings";
-import { clientKeyboard, isRemoteClient, saveClientKeyboard } from "./client-context.mjs";
+import { clientKeyboard, getClientContext, isRemoteClient, saveClientKeyboard } from "./client-context.mjs";
 import { shortcut, usesControl } from "./platform.mjs";
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
@@ -291,9 +291,7 @@ export function SettingsPanel({
           {section === "vault" && <PasswordVaultSettings onConfirm={onConfirm} onDirty={setAccountDirty} />}
           {section === "account" && <AccountSettings busy={busy} onDirty={setAccountDirty} onConfirm={onConfirm} />}
           <fieldset className="settings-fields" disabled={busy && !(section === "project" && status.storage_recovery?.required)}>
-            {section === "mobile" && (isRemoteClient()
-              ? <section className="section-title"><h3>{tr("连接这台电脑")}</h3><p>{tr("请先切换到这台电脑的本机环境，再生成或管理手机配对码。")}</p></section>
-              : <MobilePairSettings relay={draft.mobile_relay ?? ""} savedRelay={current.mobile_relay ?? ""} onChange={value => update("mobile_relay",value)} onConfirm={onConfirm} />)}
+            {section === "mobile" && <MobilePairSettings key={getClientContext().connection_id} remoteName={isRemoteClient() ? getClientContext().name || tr("远程主机") : ""} relay={draft.mobile_relay ?? ""} savedRelay={current.mobile_relay ?? ""} onChange={value => update("mobile_relay",value)} onConfirm={onConfirm} />}
             {section === "network" && (
               <>
                 <ProxySettings
