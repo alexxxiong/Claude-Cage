@@ -27,7 +27,6 @@ import {
   Trash2,
   UsersRound,
 } from "lucide-react";
-import { EnvironmentShield } from "./environment-shield";
 import logo from "./logo.png";
 import claudeLogo from "./claude-logo.svg";
 import { dropAfter, isClientProjectPath, moveItem, orderedProjects as sortProjects, projectName } from "./workspace-state.mjs";
@@ -424,7 +423,17 @@ export function WorkspaceSidebar({
             <div className="sidebar-nav-divider" aria-hidden="true" />
             {plugins && <HostPluginsNav open={plugins.open} onOpen={plugins.onOpen} />}
             {onTailscale && <button className={`sidebar-link ${tailscaleOpen ? "selected" : ""}`} aria-current={tailscaleOpen ? "page" : undefined} onClick={onTailscale} aria-label={tr("打开 Tailscale")}><Network size={17} />Tailscale</button>}
-            {plugins?.pages?.length > 0 && <PluginPagesNav pages={plugins.pages} selected={plugins.pageOpen} floatingOpen={plugins.floatingOpen} onOpen={plugins.onView} />}
+            {plugins?.pages?.length > 0 && (
+              <PluginPagesNav
+                pages={plugins.pages}
+                selected={plugins.pageOpen}
+                floatingOpen={plugins.floatingOpen}
+                desktopRunning={plugins.desktopRunning}
+                disabled={!running}
+                onOpen={plugins.onView}
+                onDesktopStop={plugins.onDesktopStop}
+              />
+            )}
           </>
         )}
       </nav>
@@ -688,7 +697,6 @@ export function WorkspaceSidebar({
         <button className="sidebar-status" onClick={onSafety}>
           <i className={`status-dot ${network.mode}`} />
           <span>{healthy ? tr("环境运行正常") : runtimeLabel}</span>
-          <EnvironmentShield size={17} healthy={healthy} />
         </button>
         <div className="sidebar-footer-actions">
           <AccountMenu onSettings={onSettings} onConfirm={onAccountConfirm} onStatus={onAccountStatus} busy={busy} />

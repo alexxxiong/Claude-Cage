@@ -35,7 +35,7 @@ import { EnvironmentShield } from "./environment-shield";
 import { TailscalePanel } from "./tailscale";
 import { HostPluginsPanel, pluginPages, pluginPageTitle, useHostPlugins } from "./host-plugins";
 import { PluginView, FloatingPluginView } from "./plugin-view";
-import { PluginDesktopApp } from "./plugin-desktop-app";
+import { PluginDesktopApp, desktopAppPath } from "./plugin-desktop-app";
 import { WorkspaceSidebar } from "./workspace-sidebar";
 import { useCLISessions, desktopSessionRequest, sessionsChanged } from "./cli-sessions";
 import { SessionAccount } from "./session-account";
@@ -126,6 +126,9 @@ function App() {
   const [defaultDesktopRunning, setDefaultDesktopRunning] = useState(false);
   const [defaultDesktopStopped, setDefaultDesktopStopped] = useState(false);
   const [defaultDesktopSignal, setDefaultDesktopSignal] = useState(0);
+  const [pluginDesktopRunning, setPluginDesktopRunning] = useState({});
+  const [pluginDesktopStopped, setPluginDesktopStopped] = useState({});
+  const [pluginDesktopSignal, setPluginDesktopSignal] = useState(0);
   const [terminalChoice, setTerminalChoice] = useState(null);
   const [openingSession, setOpeningSession] = useState("");
   const [sessionAccount, setSessionAccount] = useState(null);
@@ -381,6 +384,7 @@ function App() {
   const accountLogin = useRef("");
   const tabsBeforeLogin = useRef("");
   const [enrollmentID, setEnrollmentID] = useState("");
+  const lastHostCLIFocus = useRef("");
   const terminalAccounts = [...new Set(tabs.map(t=>t.claude_account_id).filter(Boolean))].sort().join(",");
   useEffect(() => {
     if (terminalAccounts && terminalAccounts.split(",").some(id => !claudeProfiles.accounts?.some(a => a.id === id))) {
@@ -400,11 +404,20 @@ function App() {
   }, []);
   const accountDesktops = useAccountDesktops(
     () => {setManagementPage(""); setHome(false); setDesktopOpen(true);},
-    () => {setDesktopOpen(false); setHome(true);}, notify, (...args) => confirm(...args), desktopOpen && running && status?.account_desktops_supported && !managementPage, status?.desktop_catalog_revision, handleDefaultDesktopRemoved);
+    () => {setDesktopOpen(false); setHome(true);},
+    notify,
+    (...args) => confirm(...args),
+    desktopOpen && running && status?.account_desktops_supported && !managementPage,
+    status?.desktop_catalog_revision,
+    handleDefaultDesktopRemoved,
+    Boolean(status?.account_desktops_supported && (!running || status?.ready)),
+  );
   useEffect(() => {
     if (!running) {
       setDefaultDesktopRunning(false);
       setDefaultDesktopStopped(false);
+      setPluginDesktopRunning({});
+      setPluginDesktopStopped({});
     }
   }, [running]);
   const handleDefaultDesktopRunning = useCallback((isRunning) => {
@@ -412,6 +425,44 @@ function App() {
     if (isRunning) setDefaultDesktopStopped(false);
     if (status?.account_desktops_supported) void accountDesktops.refresh(true);
   }, [status?.account_desktops_supported, accountDesktops.refresh]);
+  const handlePluginDesktopRunning = useCallback((key, isRunning) => {
+    setPluginDesktopRunning((prev) => (prev[key] === isRunning ? prev : { ...prev, [key]: isRunning }));
+    if (isRunning) {
+      setPluginDesktopStopped((prev) => (prev[key] ? { ...prev, [key]: false } : prev));
+    }
+  }, []);
+  const desktopAppPages = pages.filter((page) => page.kind === "desktop-app");
+  const desktopAppKeys = desktopAppPages.map((page) => page.key).join("\n");
+  useEffect(() => {
+    if (!running || !status?.ready || !desktopAppKeys) return;
+    let cancelled = false;
+    for (const page of desktopAppPages) {
+      void api(`${desktopAppPath(page.plugin, page.app.id)}/status`)
+        .then((value) => {
+          if (!cancelled && value) handlePluginDesktopRunning(page.key, Boolean(value.running));
+        })
+        .catch(() => {});
+    }
+    return () => { cancelled = true; };
+  }, [running, status?.ready, desktopAppKeys, handlePluginDesktopRunning]);
+  const stopPluginDesktopApp = async (page, anchor = null) => {
+    if (!(await confirm({
+      title: tr("关闭 {0}？", page.title),
+      body: tr("请先保存应用内的工作。浏览器和终端会继续运行。"),
+      confirm: tr("关闭应用"),
+      anchor,
+    }))) return;
+    try {
+      const path = desktopAppPath(page.plugin, page.app.id);
+      await api(`${path}/stop`, {});
+      setPluginDesktopRunning((prev) => ({ ...prev, [page.key]: false }));
+      setPluginDesktopStopped((prev) => ({ ...prev, [page.key]: true }));
+      setPluginDesktopSignal((n) => n + 1);
+      await refreshStatus.current?.();
+    } catch (e) {
+      notify(e.message);
+    }
+  };
   const stopDefaultDesktop = async (entry, anchor = null) => {
     if (!(await confirm({
       title: entry?.label ? tr("关闭 {0}？", desktopTitle(entry)) : "关闭 Claude Desktop？",
@@ -694,7 +745,7 @@ function App() {
     setActive(tab.id);
   };
   const openSessionTerminal = async session => {
-    if (session.running) return;
+    if (session.running && !session.paused) return;
     if (sessionOpenRequest.current?.id === session.id) return;
     sessionOpenRequest.current?.controller.abort();
     const controller = new AbortController();
@@ -983,6 +1034,19 @@ function App() {
               setActive(b.active || all[0]?.id || "");
           }
           browserIds.current = new Set(b.tabs.map((item) => item.id));
+          const focus = next.host_cli_browser;
+          if (focus?.id && focus.id !== lastHostCLIFocus.current) {
+            const tab = b.tabs.find(item => focus.tab ? item.id === focus.tab : item.id === b.active && item.login);
+            if (tab) {
+              lastHostCLIFocus.current = focus.id;
+              browserDismissed.current = false;
+              setSettingsOpen(false);
+              setManagementPage("");
+              setDesktopOpen(false);
+              setHome(false);
+              setActive(tab.id);
+            }
+          }
           initialized.current = true;
         }
       } catch (e) {
@@ -1609,15 +1673,30 @@ function App() {
   const focusHeader = tab => {
     if (tab && tab.id !== activeRef.current) void select(tab.id, false);
   };
+  const terminalAccountRequest = (path, options) => api("/cli" + path, options.body);
   const terminalHeader = tab => {
     const path = tab?.workspace || workspace;
     const account = tab?.claude_account_id && terminalAccountName(tab);
     const detail = tab?.terminalKind === "claude-login" ? tr("登录 · {0}", account || tr("新账号"))
       : account ? tab.claude_account_source === "default" ? tr("Claude · {0}（启动时账号）", account) : `Claude · ${account}` : "";
     const location = split && tab ? `heading-${tab.id}` : "heading";
+    const accountControl = tab?.cli_session_id ? (
+      <SessionAccount
+        id={tab.cli_session_id}
+        request={terminalAccountRequest}
+        inline
+        paused={tab.paused}
+        onChanged={(view) => {
+          if (view?.desktop_terminal_id && view.desktop_terminal_id !== tab.sessionId) {
+            void openSessionTerminal({ id: tab.cli_session_id });
+          }
+        }}
+      />
+    ) : null;
     return <TerminalHeader tab={tab} project={tr(projectName(path, groups, tr("新项目")))} metadata={metadata}
       contentWorkspace={path} terminalDetail={detail} terminalDetailHint={tab?.claude_account_source === "default"
         ? "此终端按启动时的普通终端登录标记。若普通终端已换号，请重新打开工作会话确认身份。" : detail}
+      accountControl={accountControl}
       busy={busy} onHome={() => setHome(true)}
       sidebarButton={sidebarButton(paneSide(tab?.id))} exitButton={expandButton(tab)}
       location={location} triggerRef={!tab || tab.id === active ? terminalTrigger : undefined}
@@ -1825,7 +1904,8 @@ function App() {
             plugins={pluginsAvailable ? { model: hostPlugins, open: pluginSidebar, page: managementPage === "plugins" ? pluginPage : null,
               onConfirm: confirm, onOpen: () => setPluginSidebar(true), onBack: leavePlugins, onPage: openPluginPage,
               pages, pageOpen: managementPage === "plugin-view" ? pluginView : "",
-              floatingOpen: floatingPages.map(page => page.key), onView: openPluginView } : null}
+              floatingOpen: floatingPages.map(page => page.key), onView: openPluginView,
+              desktopRunning: pluginDesktopRunning, onDesktopStop: stopPluginDesktopApp } : null}
             updateAction={<AppUpdateButton updates={appUpdates} />}
             workspace={selectedProject || status.workspace}
             projects={projects}
@@ -1950,12 +2030,20 @@ function App() {
           )}
           {managementPage && (
             <main className="management-page" aria-labelledby={managementPage + "-title"}>
-              <header className="chrome management-header">
-                {sidebarButton()}
-                <h1 id={managementPage + "-title"} tabIndex={-1}>{managementPage === "tailscale" ? "Tailscale" : managementPage === "plugins" && pluginPage ? pluginPageTitle(hostPlugins, pluginPage) : managementPage === "plugin-view" ? openPage?.title || tr("插件页面") : tr("Claude 账号管理")}</h1>
-              </header>
+              {!(managementPage === "plugin-view" && openPage?.kind === "desktop-app") && (
+                <header className="chrome management-header">
+                  {sidebarButton()}
+                  <h1 id={managementPage + "-title"} tabIndex={-1}>{managementPage === "tailscale" ? "Tailscale" : managementPage === "plugins" && pluginPage ? pluginPageTitle(hostPlugins, pluginPage) : managementPage === "plugin-view" ? openPage?.title || tr("插件页面") : tr("Claude 账号管理")}</h1>
+                </header>
+              )}
               <div className="management-content">
                 {managementPage === "plugin-view" && openPage?.kind === "desktop-app" ? <PluginDesktopApp key={`${currentClient.connection_id || "local"}:${pluginView}`}
+                  titleId={managementPage + "-title"}
+                  sidebarCollapsed={sidebarCollapsed}
+                  onExpand={() => persist("cage-sidebar-collapsed", false, setSidebarCollapsed)}
+                  autoStart={!pluginDesktopStopped[openPage.key]}
+                  refreshSignal={pluginDesktopSignal}
+                  onRunningChange={(isRunning) => handlePluginDesktopRunning(openPage.key, isRunning)}
                   plugin={openPage.plugin} app={openPage.app} status={status} uploads={desktopFiles.uploads} visible={!settingsOpen && windowVisible}
                   keyboard={status.keyboard} systemClipboard={browser.capabilities?.systemClipboard !== false}
                   onStatus={notify} onFallback={(text, message) => setTransfer({ text, message })} onConfirm={confirm} onDetails={() => setDetails(true)}
@@ -2061,7 +2149,8 @@ function App() {
                     {visible && terminalHeader(tab)}
                     <div className="pane-body">
                       <TerminalView
-                        session={{ ...tab, id: tab.sessionId }}
+                        session={{ ...tab, id: tab.sessionId, paused: !tab.closed && cliSessions.sessions.some(s => s.id === tab.cli_session_id && s.paused) }}
+                        onContinued={cliSessions.continued}
                         onLoginTab={result => showBrowserResult({
                           id: result.id, kind: "web", login: true, incognito: result.incognito !== false, title: "账号授权",
                         })}
@@ -2070,7 +2159,7 @@ function App() {
                             ? terminalControls.current.set(tab.id, control)
                             : terminalControls.current.delete(tab.id)
                         }
-                        visible={visible && !settingsOpen && !managementPage}
+                        visible={visible && windowVisible && !settingsOpen && !managementPage}
                         focused={active === tab.id}
                         onStatus={notify}
                         onAccountChanged={view => { if (view?.desktop_terminal_id && view.desktop_terminal_id !== tab.sessionId) void openSessionTerminal({id:tab.cli_session_id}); }}
@@ -2120,7 +2209,7 @@ function App() {
                           : tr("{0}。终端与本地文件仍可使用。", tr(network.label))} />
                     </p>
                   )}
-                  {!running && (
+                  {!running && (setupProxy || !projects.length) && (
                     <ol className="onboarding-steps" aria-label={tr("开始使用 Cage")}>
                       {["配置代理", "启动环境", "开始工作"].map(
                         (label, index) => (
@@ -2285,7 +2374,7 @@ function App() {
             <span className="status-divider" />
             <button onClick={() => openSettings("network")}>
               <MapPin size={12} />
-              <span>
+              <span className={!status.network_error && (status.location || status.safety?.exit_ip) ? "status-network-value" : undefined}>
                 {status.network_error
                   ? tr("出口待确认")
                   : status.location || status.safety?.exit_ip
@@ -2333,16 +2422,18 @@ function App() {
                 <MoreHorizontal size={15} />
               </button>
             )}
-            <button
-              onClick={stop}
-              disabled={
-                Boolean(startRequest) || (!running && !busy) || (status?.job?.kind === "stop" && busy)
-              }
-              title={tr("停止当前环境")}
-            >
-              <Power size={12} />
-              <span>{tr("停止环境")}</span>
-            </button>
+            {(running || busy) && (
+              <button
+                onClick={stop}
+                disabled={
+                  Boolean(startRequest) || (status?.job?.kind === "stop" && busy)
+                }
+                title={tr("停止当前环境")}
+              >
+                <Power size={12} />
+                <span>{tr("停止环境")}</span>
+              </button>
+            )}
           </footer>
         </div>
         {floatingPages.map((page, index) => (

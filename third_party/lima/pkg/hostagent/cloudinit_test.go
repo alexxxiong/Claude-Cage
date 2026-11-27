@@ -12,7 +12,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
-	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -20,21 +19,24 @@ import (
 	"time"
 	"unicode"
 
+	"github.com/lima-vm/sshocker/pkg/ssh"
 	"gotest.tools/v3/assert"
 
 	"github.com/lima-vm/lima/v2/pkg/hostagent/events"
-	"github.com/lima-vm/sshocker/pkg/ssh"
 )
 
-func TestCloudInitSSHArgs(t *testing.T) {
-	base := []string{"-o", "BatchMode=yes", "-o", "ControlMaster=auto", "-o", "ControlPath=test-socket", "-o", "ControlPersist=yes"}
-	agent := &HostAgent{sshConfig: &ssh.SSHConfig{AdditionalArgs: base}, instSSHAddress: "127.0.0.1", sshLocalPort: 2222}
-	want := base
-	if runtime.GOOS == "windows" {
-		want = []string{"-o", "ControlMaster=no", "-o", "ControlPath=none", "-o", "ControlPersist=no", "-o", "BatchMode=yes"}
+func TestCloudInitSSHSession(t *testing.T) {
+	control := []string{"-o", "ControlMaster=auto", "-o", "ControlPath=boot.sock", "-o", "ControlPersist=yes"}
+	a := &HostAgent{
+		instSSHAddress: "127.0.0.1",
+		sshLocalPort:   6001,
+		sshConfig:      &ssh.SSHConfig{AdditionalArgs: append(control, "-o", "BatchMode=yes")},
 	}
-	want = slices.Concat(want, []string{"-T", "-p", "2222", "127.0.0.1", "sh", "-s"})
-	assert.DeepEqual(t, agent.cloudInitSSHArgs(), want)
+	if runtime.GOOS == "windows" {
+		control = []string{"-o", "ControlMaster=no", "-o", "ControlPath=none", "-o", "ControlPersist=no"}
+	}
+	cmd := a.cloudInitCommand(t.Context(), cloudInitLogStreamScript)
+	assert.DeepEqual(t, cmd.Args[1:], append(control, "-o", "BatchMode=yes", "-T", "-p", "6001", "127.0.0.1", "sh", "-s"))
 }
 
 func TestEmitCloudInitProgressEventStripsControlChars(t *testing.T) {

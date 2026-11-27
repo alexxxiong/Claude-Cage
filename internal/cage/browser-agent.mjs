@@ -622,6 +622,7 @@ async function browserSettings(section = "general") {
 }
 async function editor(workspace = config.workspace, reload = false) {
   if (typeof workspace !== "string" || !workspace.startsWith("/")) throw new Error("Invalid workspace");
+  if (!existsSync("/usr/bin/code-server")) throw new Error("Editor is not installed");
   const editorURL = `http://127.0.0.1:18080/?folder=${encodeURIComponent(workspace)}`;
   const existing = [...targets.values()].find((t) =>
     t.url === editorURL,
@@ -635,7 +636,8 @@ async function editor(workspace = config.workspace, reload = false) {
     redirect: "manual",
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
     body: new URLSearchParams({ password: config.editorPassword }),
-    signal: AbortSignal.timeout(5000),
+    // The first request also wakes an idle editor and waits for its health check.
+    signal: AbortSignal.timeout(20000),
   });
   const cookies = response.headers.getSetCookie().map((raw) => {
     const first = raw.split(";")[0],
@@ -950,7 +952,8 @@ const server = http.createServer(async (req, res) => {
         try { return await vault.request(input); }
         catch (error) { return { vaultError: error.message }; }
       }
-      if (req.url === "/login-open" || (req.url === "/new" && (input.route || isClaudeSignIn(input.url)))) {
+      const accountHome = input.account && (input.url === "https://claude.ai" || input.url === "https://claude.ai/");
+      if (req.url === "/login-open" || (req.url === "/new" && (input.route || accountHome || isClaudeSignIn(input.url)))) {
         const external = req.url === "/new" && !isClaudeSignIn(input.url);
         const privateLogin = !external && !existsSync("/etc/claude-cage/login-browser-mode");
         openingTargets++;

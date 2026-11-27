@@ -34,6 +34,7 @@ type claudeAccountInput struct {
 	Action                  string            `json:"action"`
 	Identity                string            `json:"identity"`
 	ID                      string            `json:"id"`
+	Name                    *string           `json:"name,omitempty"`
 	Label                   string            `json:"label"`
 	Enabled                 *bool             `json:"enabled"`
 	HandoffGroup            *string           `json:"handoff_group"`
@@ -272,8 +273,8 @@ func (s *Server) deleteClaudeAccount(ctx context.Context, id string) (claudeAcco
 			return list, errors.New("请先结束该账号的登录或工作终端，再删除账号")
 		}
 	}
-	if s.mobileCLI.activeAccounts()[id] > 0 {
-		return list, errors.New("请等待该账号的手机任务结束后再删除账号")
+	if s.activeAccountRuns()[id] > 0 {
+		return list, errors.New("请等待该账号的 CLI 任务结束后再删除账号")
 	}
 	if s.accountDesktopsSupported() && s.vmRunning() {
 		checkCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
@@ -375,7 +376,7 @@ func (s *Server) pollClaudeAccounts(list claudeAccountList) {
 	var oldest time.Time
 	for _, a := range list.Accounts {
 		attempt := m.attempted[a.ID]
-		if m.usageActive[claudeIdentityHash(a.Email, a.Organization)] == nil && a.Source != "default" && a.Enabled && now.Sub(attempt) >= time.Minute && (id == "" || attempt.Before(oldest)) {
+		if m.usageActive[claudeIdentityHash(a.Email, a.Organization)] == nil && a.Source != "default" && !a.CodeUnlinked && a.Enabled && now.Sub(attempt) >= time.Minute && (id == "" || attempt.Before(oldest)) {
 			id, oldest = a.ID, attempt
 		}
 	}
@@ -570,7 +571,7 @@ func (s *Server) runClaudeRefresh(parent context.Context, id, guestID string, ca
 							err = list.observe(existing.ID, recovered, time.Now())
 							notice = "已恢复已有账号的登录，保留原目录、会话和参与设置"
 						} else {
-							notice = "此身份已在账号列表中，本次登录未更新原账号。请先等待该账号的手机任务结束，并关闭仍使用它的终端，再从原账号卡片重新登录。"
+							notice = "此身份已在账号列表中，本次登录未更新原账号。请先等待该账号的 CLI 任务结束，并关闭仍使用它的终端，再从原账号卡片重新登录。"
 						}
 					}
 				} else {
@@ -616,8 +617,8 @@ func (s *Server) recoverClaudeLogin(ctx context.Context, accountID, target, sour
 		return claudeGuestSnapshot{}, errTerminalBusy
 	}
 	defer s.op.Unlock()
-	if s.mobileCLI.activeAccounts()[accountID] > 0 {
-		return claudeGuestSnapshot{}, errors.New("请先结束该账号正在执行的移动 CLI 轮次，再重新登录")
+	if s.activeAccountRuns()[accountID] > 0 {
+		return claudeGuestSnapshot{}, errors.New("请先结束该账号正在执行的 CLI 任务，再重新登录")
 	}
 	if login, err := s.terminals.existingClaudeLogin(accountID, true); err != nil {
 		return claudeGuestSnapshot{}, err

@@ -219,6 +219,9 @@ internal sealed class MainWindow : Form
         Script($"window.cageWindowVisible = {(visible ? "true" : "false")}; window.dispatchEvent(new Event('cage-window-visibility'));");
         PublishFocus(visible && Form.ActiveForm == this);
     }
+    internal Task<int> RunCLIUpdate(Stream stream, UpdateClients clients, CancellationToken lifetime) =>
+        InvokeAsync<int>(async token => await updater.RunCLI(stream, stream, clients, token), lifetime);
+
     private void PublishUpdate(Dictionary<string, object?> state) {
         if (state.TryGetValue("phase", out var phase) && phase as string == "failed") _ = Backend.Report("App update failed: " + state.GetValueOrDefault("message"));
         Script("window.dispatchEvent(new CustomEvent('cage-app-update',{detail:" + JsonSerializer.Serialize(state) + "}));");
@@ -422,7 +425,8 @@ internal sealed class MainWindow : Form
         try
         {
             smokePhase = "starting_backend";
-            var (exit, data) = await Backend.Json(["desktop", "--json", ..options], lifetime.Token);
+            TimeSpan? deadline = options.Contains("--complete-update") ? Backend.UpdateStopDeadline : null;
+            var (exit, data) = await Backend.Json(["desktop", "--json", ..options], lifetime.Token, deadline);
             smokePhase = "backend_returned";
             if (exit != 0) throw new IOException(data.Text("message") is { Length: > 0 } detail ? detail : InterfaceLanguage.Text("工作台未能启动"));
             controllerNeedsUpdate = data.Text("status") != "ready";
@@ -595,7 +599,7 @@ internal sealed class MainWindow : Form
                 }
                 case "clipboardReadContent":
                     if (Clipboard.ContainsFileDropList()) result = RememberFiles(Clipboard.GetFileDropList().Cast<string>().ToArray());
-                    else if (SharedClipboard.RichText() is { } copiedText) result = new { text = copiedText };
+                    else if (SharedClipboard.RichText(Clipboard.GetDataObject()) is { } copiedText) result = new { text = copiedText };
                     else if (Clipboard.ContainsImage())
                     {
                         using var clipboardImage = Clipboard.GetImage() ?? throw new InvalidDataException("无法读取剪贴板图片");

@@ -19,27 +19,31 @@ if systemctl is-active --quiet "desktop-$app_id.service"; then
   echo '请先保存工作并关闭应用，再更新或修复安装。' >&2
   exit 1
 fi
-apt_get() {
-  local status
-  if sudo env DEBIAN_FRONTEND=noninteractive APT_CONFIG="${CAGE_APT_CONFIG:-/dev/null}" apt-get -o DPkg::Lock::Timeout=60 "$@" </dev/null; then
-    return 0
-  else
-    status=$?
-  fi
-  printf 'APT_FAILED exit=%s command=apt-get %s\n' "$status" "$*" >&2
-  return "$status"
-}
 temporary=$(mktemp -d)
-trap 'rm -rf "$temporary"' EXIT
+created_apt_list=
+created_apt_keyring=
+cleanup_install() {
+  if [[ -n $created_apt_list ]]; then
+    sudo rm -f -- "$created_apt_list" 2>/dev/null || :
+  fi
+  if [[ -n $created_apt_keyring ]]; then
+    sudo rm -f -- "$created_apt_keyring" 2>/dev/null || :
+  fi
+  if [[ -n ${_curl_compat_home:-} ]]; then
+    rm -rf -- "$_curl_compat_home"
+  fi
+  rm -rf "$temporary"
+}
+trap cleanup_install EXIT
 chmod 0755 "$temporary"
 previous_version=
 if sudo test -s "$record_dir/app.json"; then
   previous_version=$(python3 -I -c 'import json,sys;print(json.load(open(sys.argv[1])).get("version",""))' "$record_dir/app.json" 2>/dev/null || :)
 fi
 printf '正在准备安装依赖…\n'
-apt_get update
+cage_desktop_apt update
 # shellcheck disable=SC2086
-apt_get install -y --no-install-recommends $app_dependencies ${app_packages:-}
+cage_desktop_apt install -y --no-install-recommends $app_dependencies ${app_packages:-}
 
 # The sources and keyrings a vendor's package adds for itself are recorded so
 # that removing the application removes them too.
@@ -87,11 +91,58 @@ CHECK
 }
 
 download() {
+  local destination="$1"
+  local cache_dir="$HOME/.cache/desktop-apps/$app_id"
+  local key part stale attempt status http attempts=3
+  key=$(python3 -I -c 'import hashlib,sys;print(hashlib.sha256((sys.argv[1]+"\n"+sys.argv[2]).encode()).hexdigest()[:16])' "$release_version" "$release_url")
+  mkdir -p -m 0700 "$cache_dir"
+  for stale in "$cache_dir"/*; do
+    [ -e "$stale" ] || continue
+    case "$(basename "$stale")" in
+      "$key.part"|"$key.part.ranges") ;;
+      *) rm -rf -- "$stale" ;;
+    esac
+  done
+  part="$cache_dir/$key.part"
   printf '正在从官方站点下载 %s…\n' "$release_version"
-  cage_curl_download "$1" --proto '=https' --proto-redir '=https' --max-redirs 5 -fSL --connect-timeout 15 "$release_url" -o "$1"
-  if [[ -n $release_digest ]]; then
-    printf '%s  %s\n' "$release_digest" "$1" | sha256sum -c --quiet - || { echo '下载文件校验失败，安装已停止。' >&2; exit 1; }
-  fi
+  for ((attempt=1; attempt<=attempts; attempt++)); do
+    if (( attempt > 1 )); then
+      printf '下载中断，正在续传重试（%s/%s）…\n' "$attempt" "$attempts"
+    fi
+    if http="$(cage_curl_download "$part" --proto '=https' --proto-redir '=https' --max-redirs 5 -fSL --connect-timeout 15 --continue-at - --write-out '%{http_code}' "$release_url" -o "$part" </dev/null)"; then
+      status=0
+    else
+      status=$?
+    fi
+    if [[ $status == 0 ]]; then
+      if [[ -n $release_digest ]]; then
+        if ! printf '%s  %s\n' "$release_digest" "$part" | sha256sum -c --quiet -; then
+          rm -rf -- "$part" "$part.ranges"
+          echo '下载文件校验失败，安装已停止。' >&2
+          exit 1
+        fi
+      fi
+      rm -rf -- "$part.ranges"
+      mv -f "$part" "$destination"
+      return 0
+    fi
+    if [[ $http == 416 ]]; then
+      rm -rf -- "$part" "$part.ranges"
+      if (( attempt < attempts )); then
+        continue
+      fi
+    fi
+    case "$status" in
+      33|36) rm -rf -- "$part" "$part.ranges" ;;
+      5|6|7|18|28|35|52|55|56|92) ;;
+      22) case "$http" in 408|429|500|502|503|504) ;; *) exit "$status" ;; esac ;;
+      *) exit "$status" ;;
+    esac
+    if (( attempt < attempts )); then
+      sleep $((attempt * 2))
+    fi
+  done
+  exit "${status:-1}"
 }
 
 package=
@@ -114,18 +165,24 @@ case "$app_source" in
       fingerprints=$(gpg --batch --homedir "$temporary/gnupg" --with-colons --list-keys | awk -F: '$1 == "fpr" {print $10}')
       grep -qxF "$app_fingerprint" <<<"$fingerprints" || { echo '官方签名密钥与插件声明的指纹不符，安装已停止。' >&2; exit 1; }
       gpg --batch --homedir "$temporary/gnupg" --export "$app_fingerprint" > "$temporary/keyring.gpg"
+      if ! sudo test -e "$keyring"; then created_apt_keyring=$keyring; fi
       sudo install -m 0644 "$temporary/keyring.gpg" "$keyring"
+      if ! sudo test -e "$list"; then created_apt_list=$list; fi
       printf 'deb [arch=%s signed-by=%s] %s %s %s\n' "$arch" "$keyring" "$app_repository" "$app_suite" "$app_components" | sudo tee "$list" >/dev/null
     else
       sudo rm -f "$list" "$keyring"
     fi
-    apt_get update
+    declare -F cage_refresh_apt_sources >/dev/null && cage_refresh_apt_sources || :
+    cage_desktop_apt update
     printf '正在下载并安装最新版本…\n'
-    apt_get install -y --no-install-recommends "$package"
+    cage_desktop_apt install -y --no-install-recommends "$package"
+    created_apt_list=
+    created_apt_keyring=
     if sudo grep -rlsF -- "$app_repository" /etc/apt/sources.list.d 2>/dev/null | grep -vqxF "$list"; then
       if sudo test -e "$list"; then
         sudo rm -f "$list" "$keyring"
-        apt_get update
+        declare -F cage_refresh_apt_sources >/dev/null && cage_refresh_apt_sources || :
+        cage_desktop_apt update
       fi
     fi
     version=$(dpkg-query -W -f='${Version}' "$package")
@@ -136,7 +193,7 @@ case "$app_source" in
     package=$(dpkg-deb -f "$temporary/app.deb" Package)
     [[ $package =~ ^[a-z0-9][a-z0-9+.-]{1,62}$ ]] || { echo '下载的安装包无效。' >&2; exit 1; }
     printf '正在安装 %s…\n' "$release_version"
-    apt_get install -y --no-install-recommends "$temporary/app.deb"
+    cage_desktop_apt install -y --no-install-recommends "$temporary/app.deb"
     version=$(dpkg-query -W -f='${Version}' "$package")
     ;;
   archive)
